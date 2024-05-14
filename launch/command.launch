@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="ros_ht_msg" type="ros_ht_msg" name="BasePlate"  />
+    <node pkg="ros_modbus_msg" type="node.py" name="SlidingTable"/>
+    <node pkg="ros_modbus_msg" type="Spindle_motor.py" name="SpindleMotor"/>
+    <node pkg="ros_cart_msg" type="command_node.py" name="CommandNode" />
+</launch>
