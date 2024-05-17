@@ -2,34 +2,51 @@ import rospy
 import os
 import logging
 import json
-from icecream import ic
+from icecream import ic  # 假设这是一个用于调试的函数，实际项目中可能需要替换为标准日志记录方法
 from ros_ht_msg.msg import ht_control
 from ros_modbus_msg.msg import operation
 from ros_modbus_msg.msg import spindle_argument
 
+
 # 配置日志
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-# 移动指令发布：
-class BasePlateCommand:
-    def __init__(self):
-        self.pub_BasePlate = rospy.Publisher("HT_Control", ht_control, queue_size=10)
+# 建议使用的基类，用于消息发布
+class BaseCommand:
+    def __init__(self, pub_topic, msg_type):
+        self.pub_topic = pub_topic
+        self.pub = rospy.Publisher(self.pub_topic, msg_type, queue_size=10)
         self.param = ReadParam()
-        self.move()
-    
-    def move(self):
-        self.Commandsetting(self.param.position_param,self.param.position_param.keys())
 
-    def Commandsetting(self, paramdict,keylist:list):
+    def publish_command(self, command_func, *args, **kwargs):
+        try:
+            ic(*args, **kwargs)
+            msg = command_func(*args, **kwargs)
+            self.pub.publish(msg)
+            rospy.loginfo(f"指令发布成功: {str(msg)}")
+        except Exception as e:
+            rospy.logerr(f"{str(self.pub_topic)}发布指令失败: {str(e)}")
+
+    def sleep(self, seconds):
+        rospy.sleep(seconds)
+
+class BasePlateCommand(BaseCommand):
+    def __init__(self):
+        super().__init__("HT_Control", ht_control)
+        self.move()
+
+    def move(self):
+        self.command_setting(self.param.position_param,self.param.position_param.keys())
+
+    def command_setting(self, paramdict, keylist):
         for key in keylist:
             moveparam = paramdict[key][1:]
-            ic(moveparam)
-            ic(paramdict[key][0])
             for t in range(paramdict[key][0]):
-                self._dopub(self._BasePlateCommand(moveparam))
+                ic(paramdict[key][0])
+                self.publish_command(self._base_plate_command, moveparam)
+                self.sleep(1)
 
-    def _BasePlateCommand(self,moveparam:list):
+    def _base_plate_command(self, moveparam):
         control = ht_control()
         control.mode = moveparam[0]
         control.x = moveparam[1]
@@ -37,31 +54,22 @@ class BasePlateCommand:
         control.z = moveparam[3]
         return control
 
-    def _dopub(self,control):
-        try:
-            self.pub_BasePlate.publish(control)
-        except Exception as e:
-            rospy.logerr(f"发布指令失败: {str(e)}")
-        rospy.sleep(1)
-        ic("sleep")
-
-# 滑台指令发布：
-class SlidingTableCommand:
+class SlidingTableCommand(BaseCommand):
     def __init__(self):
-        self.pub_SlidingTable = rospy.Publisher("sub_param", operation, queue_size=10)
-        self.param = ReadParam()
+        super().__init__("sub_param", operation)
         self.move()
-    
-    def move(self):
-        self.CommandSetting(self.param.splindle_param,self.param.splindle_param.keys())
 
-    def CommandSetting(self,paramdict,keylist:list):
+    def move(self):
+        self.command_setting(self.param.splindle_param,self.param.splindle_param.keys())
+
+    def command_setting(self, paramdict, keylist):
         for key in keylist:
             moveparam = paramdict[key]
             ic(moveparam)
-            self._dopub(self._SlidingTableCommand(moveparam))
+            self.publish_command(self._sliding_table_command, moveparam)
+            # self.sleep(15)
 
-    def _SlidingTableCommand(self,moveparam:list):
+    def _sliding_table_command(self, moveparam):
         oper = operation()
         oper.operation = moveparam[0]
         oper.A_x = moveparam[1]
@@ -70,59 +78,44 @@ class SlidingTableCommand:
         oper.x_speed = moveparam[2]
         oper.y_speed = moveparam[4]
         oper.z_speed = moveparam[6]
-
-        ic(oper)
         return oper
-    
-    def _dopub(self,oper):
-        try:
-            self.pub_SlidingTable.publish(oper)
-        except Exception as e:
-            rospy.logerr(f"发布指令失败: {str(e)}")
-        rospy.sleep(15)
 
-# 主轴电机启动：
-class SpindleMotorCommand:
+class SpindleMotorCommand(BaseCommand):
     def __init__(self):
-        self.pub_SpindleMotor = rospy.Publisher("spindle_motor", spindle_argument, queue_size=10)
-        self.param = ReadParam()        
-
-        self.spindlemotor_list = self._spindleArgument(self.param.motor_param.keys())   
-
-        self.dopub(self._CommandSetting(self.spindlemotor_list))
-
+        super().__init__("spindle_motor", spindle_argument)    
+        self.spindlemotor_list = self._spindle_argument(self.param.motor_param.keys())   
+        self.dopub(self._command_setting(self.spindlemotor_list))
     def dopub(self,command_list):
         try:
-            self.pub_SpindleMotor.publish(command_list[0])
+            self.pub.publish(command_list[0])
             ic(1)
             rospy.sleep(command_list[2])
-            ic("wait")
-            self.pub_SpindleMotor.publish(command_list[1])
+            ic(f"wait{command_list[2]}")
+            self.pub.publish(command_list[1])
             ic(2)
 
         except Exception as e:
-            rospy.logerr(f"发布指令失败: {str(e)}")
-        
-    def _CommandSetting(self,spindlemotorlist):
-        start_command = self._SpindleMotorCommand([spindlemotorlist[1],spindlemotorlist[2]])
-        end_command = self._SpindleMotorCommand([spindlemotorlist[1],spindlemotorlist[3]])
-        time  = self.param.motor_param["time"]
+            rospy.logerr(f"发布指令失败: {str(e)}") 
+
+    def _command_setting(self, spindlemotorlist):
+        start_command = self._spindle_motor_command([spindlemotorlist[1], spindlemotorlist[2]])
+        end_command = self._spindle_motor_command([spindlemotorlist[1], spindlemotorlist[3]])
+        time = self.param.motor_param["time"]
         return [start_command, end_command, time]
 
-    def _SpindleMotorCommand(self,moveparam:list):
+    def _spindle_motor_command(self, moveparam):
         spindle = spindle_argument()
         spindle.oper = 1
         spindle.address = moveparam[0]
         spindle.value = moveparam[1]
         spindle.num_reg = 1
         return spindle
-        
-    def _spindleArgument(self,keys):
+
+    def _spindle_argument(self, keys):
         param_list = []
         for key in keys:
-            param_list.append(self.param.motor_param[key]) 
+            param_list.append(self.param.motor_param[key])
         return param_list
-
 
 class ReadParam:
     def __init__(self):
@@ -167,15 +160,9 @@ class ReadParam:
             data = json.load(j)
         return data
 
-
 if __name__ == "__main__":
     rospy.init_node("command_node")
-    # BasePlateCommand()
-    # SlidingTableCommand()
+    # 实例化并运行各个命令发布类
+    BasePlateCommand()
+    SlidingTableCommand()
     SpindleMotorCommand()
-
-    
-
-
-
-    
