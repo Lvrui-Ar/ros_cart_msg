@@ -2,11 +2,16 @@ import rospy
 import os
 import logging
 import json
-from icecream import ic  # 假设这是一个用于调试的函数，实际项目中可能需要替换为标准日志记录方法
+import sys
+import signal
+from icecream import ic  
 from ros_ht_msg.msg import ht_control
 from ros_modbus_msg.msg import operation
 from ros_modbus_msg.msg import spindle_argument
 
+def signal_handle(sig,frame):
+    logging.info("Ctrl+C was pressed. Exiting...")
+    sys.exit(0)
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -44,7 +49,7 @@ class BaseCommand:
         """
         try:
             # 尝试执行命令函数，并发布消息
-            ic(*args, **kwargs)  # ic函数用于验证命令执行
+            ic(*args, **kwargs)  
             msg = command_func(*args, **kwargs)
             self.pub.publish(msg)
             rospy.loginfo(f"指令发布成功: {str(msg)}")
@@ -74,7 +79,7 @@ class BasePlateCommand(BaseCommand):
         初始化BasePlateCommand类的实例。
         """
         super().__init__("HT_Control", ht_control)  # 调用父类构造函数，初始化命令名称和控制对象
-        self.move()  # 开始移动基板
+        self.move()
 
     def move(self):
         """
@@ -113,7 +118,6 @@ class BasePlateCommand(BaseCommand):
 class SlidingTableCommand(BaseCommand):
     """
     SlidingTableCommand类，继承自BaseCommand，用于控制滑台的运动。
-
     Attributes:
         param (object): 配置参数对象。
     """
@@ -191,11 +195,10 @@ class SpindleMotorCommand(BaseCommand):
         - 先发布启动命令，等待一定时间后，再发布停止命令。
         """
         try:
-            ic("start")
+
             self.pub.publish(command_list[0])  # 发布启动命令
-            ic(f"wait{command_list[2]}")
+            ic(f"wait: {command_list[2]}")
             rospy.sleep(command_list[2])  # 等待指定的时间
-            ic("end")
             self.pub.publish(command_list[1])  # 发布停止命令
         except Exception as e:
             rospy.logerr(f"发布指令失败: {str(e)}") 
@@ -312,6 +315,8 @@ class ReadParam:
 
 if __name__ == "__main__":
     rospy.init_node("command_node")
+
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     
     # 实例化并运行各个命令发布类
     BasePlateCommand()
